@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ELSA – Plant Stress Language Decoder</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ─── Design Tokens ─────────────────────────────────────────── */
+    :root {
+      --bg:          #0a0f0a;
+      --surface:     #101810;
+      --card:        #141f14;
+      --border:      #1e2e1e;
+      --text:        #d4e8d4;
+      --muted:       #5a7a5a;
+      --accent:      #39ff6a;
+      --accent-dim:  #1a7a35;
+      --warn:        #f5c518;
+      --high:        #ff7a00;
+      --crit:        #ff2d2d;
+      --healthy:     #2ecc71;
+      --font-head:   'Syne', sans-serif;
+      --font-mono:   'Space Mono', monospace;
+      --radius:      12px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-mono);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ─── Noise grain overlay ─────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 0; opacity: .4;
+    }
+
+    /* ─── Header ─────────────────────────────────────────────── */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 32px;
+      border-bottom: 1px solid var(--border);
+      position: relative; z-index: 10;
+    }
+
+    .logo {
+      display: flex; align-items: center; gap: 14px;
+    }
+    .logo-icon {
+      width: 42px; height: 42px;
+      background: linear-gradient(135deg, #1a5c2a, #39ff6a);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; filter: drop-shadow(0 0 8px #39ff6a55);
+    }
+    .logo-text {
+      font-family: var(--font-head);
+      font-weight: 800; font-size: 20px; letter-spacing: -0.5px;
+      color: #fff;
+    }
+    .logo-sub {
+      font-size: 10px; color: var(--muted); letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .header-status {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; letter-spacing: 1px; color: var(--muted);
+    }
+    .pulse-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 #39ff6a55; }
+      50%       { opacity: .7; transform: scale(1.15); box-shadow: 0 0 0 6px #39ff6a00; }
+    }
+
+    /* ─── Tab Bar ────────────────────────────────────────────── */
+    nav {
+      display: flex; gap: 4px;
+      padding: 16px 32px 0;
+      position: relative; z-index: 10;
+      border-bottom: 1px solid var(--border);
+    }
+    .tab {
+      padding: 10px 20px; font-size: 11px;
+      letter-spacing: 2px; text-transform: uppercase;
+      cursor: pointer; border: none; background: transparent;
+      color: var(--muted); font-family: var(--font-mono);
+      border-bottom: 2px solid transparent;
+      transition: color .2s, border-color .2s;
+    }
+    .tab:hover  { color: var(--text); }
+    .tab.active { color: var(--accent); border-color: var(--accent); }
+
+    /* ─── Content area ───────────────────────────────────────── */
+    main { padding: 32px; position: relative; z-index: 10; }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ─── Dashboard grid ─────────────────────────────────────── */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 280px;
+      grid-template-rows: auto auto;
+      gap: 20px;
+    }
+
+    /* ─── Cards ──────────────────────────────────────────────── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+      transition: border-color .3s;
+    }
+    .card:hover { border-color: var(--accent-dim); }
+
+    .card-label {
+      font-size: 10px; letter-spacing: 2px;
+      text-transform: uppercase; color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .card-value {
+      font-family: var(--font-head);
+      font-size: 42px; font-weight: 800;
+      line-height: 1; color: #fff;
+    }
+    .card-unit  { font-size: 16px; color: var(--muted); margin-left: 4px; }
+    .card-sub   { font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+    .card-icon  { font-size: 26px; margin-bottom: 10px; }
+
+    /* Soil bar */
+    .soil-bar-wrap {
+      margin-top: 10px;
+      background: var(--surface);
+      border-radius: 6px; height: 8px; overflow: hidden;
+    }
+    .soil-bar-fill {
+      height: 100%; border-radius: 6px;
+      background: linear-gradient(90deg, var(--crit), var(--warn), var(--healthy));
+      transition: width 1s ease;
+    }
+
+    /* Rain badge */
+    .rain-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 100px;
+      font-size: 12px; font-weight: 700; letter-spacing: 1px;
+      margin-top: 10px;
+    }
+    .rain-yes { background: #0a2a50; color: #5bc8ff; border: 1px solid #1a5080; }
+    .rain-no  { background: #1a1a1a; color: var(--muted); border: 1px solid var(--border); }
+
+    /* ─── Stress Status Card (spans full row 2) ──────────────── */
+    .stress-card {
+      grid-column: 1 / 4;
+      display: flex; align-items: center; gap: 32px;
+      padding: 28px 32px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--card);
+      transition: border-color .5s;
+      position: relative; overflow: hidden;
+    }
+    .stress-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      background: var(--stress-color, var(--accent));
+      transition: background .5s;
+    }
+
+    .stress-level-badge {
+      min-width: 130px;
+      text-align: center;
+      padding: 14px 20px;
+      border-radius: 10px;
+      border: 2px solid var(--stress-color, var(--accent));
+      transition: border-color .5s;
+    }
+    .stress-level-badge .level-text {
+      font-family: var(--font-head);
+      font-size: 22px; font-weight: 800;
+      color: var(--stress-color, var(--accent));
+      transition: color .5s;
+    }
+    .stress-level-badge .level-sub {
+      font-size: 10px; letter-spacing: 2px;
+      color: var(--muted); margin-top: 3px;
+    }
+
+    .stress-info { flex: 1; }
+    .stress-desc { font-size: 13px; color: var(--text); line-height: 1.6; }
+    .stress-score-row {
+      display: flex; align-items: center; gap: 12px; margin-top: 12px;
+    }
+    .score-bar-wrap {
+      flex: 1; background: var(--surface);
+      border-radius: 6px; height: 10px; overflow: hidden;
+    }
+    .score-bar-fill {
+      height: 100%; border-radius: 6px;
+      background: var(--stress-color, var(--accent));
+      transition: width 1s ease, background .5s;
+    }
+    .score-text {
+      font-family: var(--font-head);
+      font-size: 18px; color: var(--stress-color, var(--accent));
+      min-width: 50px; text-align: right;
+      transition: color .5s;
+    }
+
+    /* ─── History Panel ──────────────────────────────────────── */
+    .history-panel {
+      grid-column: 4;
+      grid-row: 1 / 3;
+      display: flex; flex-direction: column; gap: 0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .history-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      font-size: 10px; letter-spacing: 2px;
+      color: var(--muted); text-transform: uppercase;
+    }
+    .history-list {
+      flex: 1; overflow-y: auto;
+      padding: 8px 0;
+      max-height: 440px;
+    }
+    .history-list::-webkit-scrollbar { width: 4px; }
+    .history-list::-webkit-scrollbar-track { background: var(--surface); }
+    .history-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .history-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 20px; border-bottom: 1px solid #0d180d;
+      font-size: 11px; transition: background .15s;
+    }
+    .history-item:hover { background: var(--surface); }
+    .history-time { color: var(--muted); }
+    .history-badge {
+      padding: 3px 8px; border-radius: 4px; font-size: 9px;
+      font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    }
+    .badge-HEALTHY  { background: #0d2b1a; color: var(--healthy); }
+    .badge-MODERATE { background: #2b2200; color: var(--warn); }
+    .badge-HIGH     { background: #2b1500; color: var(--high); }
+    .badge-CRITICAL { background: #2b0000; color: var(--crit); }
+
+    /* ─── Treatment Tab ──────────────────────────────────────── */
+    .treatment-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .treatment-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .treatment-card-header {
+      padding: 16px 22px;
+      display: flex; align-items: center; gap: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .treatment-card-header .badge-circle {
+      width: 36px; height: 36px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 17px;
+    }
+    .treatment-card-title {
+      font-family: var(--font-head);
+      font-size: 15px; font-weight: 700; color: #fff;
+    }
+    .treatment-card-sub {
+      font-size: 10px; letter-spacing: 1px; color: var(--muted);
+    }
+    .treatment-steps {
+      padding: 18px 22px;
+      list-style: none;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .treatment-step {
+      display: flex; gap: 12px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border-radius: 8px;
+      font-size: 12px; line-height: 1.6; color: var(--text);
+      border-left: 3px solid var(--border);
+      transition: border-color .3s;
+    }
+    .treatment-step.active-step { border-left-color: var(--accent); }
+
+    .current-treatment-banner {
+      background: linear-gradient(90deg, #0d2b1a, #0a1a10);
+      border: 1px solid var(--accent-dim);
+      border-radius: var(--radius);
+      padding: 20px 28px;
+      margin-bottom: 24px;
+      display: flex; align-items: center; gap: 20px;
+    }
+    .current-treatment-banner .banner-icon { font-size: 32px; }
+    .current-treatment-banner .banner-title {
+      font-family: var(--font-head);
+      font-size: 18px; font-weight: 700; color: var(--accent);
+    }
+    .current-treatment-banner .banner-sub {
+      font-size: 12px; color: var(--muted); margin-top: 3px;
+    }
+
+    .active-steps-list {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+    .active-steps-header {
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--border);
+      font-size: 10px; letter-spacing: 2px; color: var(--muted);
+      text-transform: uppercase;
+    }
+    .active-step-item {
+      display: flex; align-items: flex-start; gap: 14px;
+      padding: 14px 22px;
+      border-bottom: 1px solid #0d180d;
+      font-size: 13px; color: var(--text); line-height: 1.5;
+    }
+    .step-num {
+      min-width: 24px; height: 24px;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-radius: 50%; display: flex;
+      align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700;
+    }
+
+    /* ─── Charts Tab ─────────────────────────────────────────── */
+    .chart-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .chart-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+    }
+    .chart-card canvas { width: 100% !important; }
+
+    /* ─── Settings Tab ───────────────────────────────────────── */
+    .settings-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 32px;
+      max-width: 600px;
+    }
+    .settings-title {
+      font-family: var(--font-head); font-size: 18px;
+      font-weight: 700; color: #fff; margin-bottom: 20px;
+    }
+    .settings-row {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 14px 0; border-bottom: 1px solid var(--border);
+    }
+    .settings-row:last-child { border-bottom: none; }
+    .settings-key { font-size: 12px; color: var(--text); }
+    .settings-val { font-size: 12px; color: var(--accent); font-family: var(--font-mono); }
+
+    /* ─── Spinner / Loading ──────────────────────────────────── */
+    .loading-overlay {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      z-index: 9999;
+      transition: opacity .5s;
+    }
+    .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+    .loading-leaf { font-size: 48px; animation: spin 2s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text {
+      font-size: 12px; letter-spacing: 2px;
+      color: var(--muted); margin-top: 16px;
+      text-transform: uppercase;
+    }
+
+    /* ─── Responsive ─────────────────────────────────────────── */
+    @media (max-width: 1100px) {
+      .dashboard-grid { grid-template-columns: 1fr 1fr; }
+      .history-panel  { grid-column: 1 / 3; grid-row: auto; }
+      .stress-card    { grid-column: 1 / 3; }
+      .treatment-grid { grid-template-columns: 1fr; }
+      .chart-grid     { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      header { padding: 16px; }
+      main   { padding: 16px; }
+      nav    { padding: 0 16px; }
+      .dashboard-grid { grid-template-columns: 1fr; }
+      .stress-card    { grid-column: 1; flex-direction: column; }
+      .history-panel  { grid-column: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loader">
+  <div class="loading-leaf">🌿</div>
+  <div class="loading-text">Initialising ELSA Model…</div>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🌱</div>
+    <div>
+      <div class="logo-text">ELSA</div>
+      <div class="logo-sub">Plant Stress Language Decoder</div>
+    </div>
+  </div>
+  <div class="header-status">
+    <div class="pulse-dot" id="statusDot"></div>
+    <span id="statusText">Connecting…</span>
+    <span style="color:var(--border)">|</span>
+    <span id="lastUpdated">—</span>
+  </div>
+</header>
+
+<!-- Nav Tabs -->
+<nav>
+  <button class="tab active" data-tab="dashboard">Dashboard</button>
+  <button class="tab" data-tab="treatment">Treatment</button>
+  <button class="tab" data-tab="history">History</button>
+  <button class="tab" data-tab="settings">Settings</button>
+</nav>
+
+<main>
+
+  <!-- ─── DASHBOARD TAB ──────────────────────────────────── -->
+  <div class="tab-panel active" id="panel-dashboard">
+    <div class="dashboard-grid">
+
+      <!-- Temperature -->
+      <div class="card" id="card-temp">
+        <div class="card-icon">🌡️</div>
+        <div class="card-label">Temperature</div>
+        <div class="card-value" id="val-temp">—<span class="card-unit">°C</span></div>
+        <div class="card-sub" id="sub-temp">Reading from DHT11 sensor</div>
+      </div>
+
+      <!-- Humidity -->
+      <div class="card" id="card-hum">
+        <div class="card-icon">💧</div>
+        <div class="card-label">Air Humidity</div>
+        <div class="card-value" id="val-hum">—<span class="card-unit">%</span></div>
+        <div class="card-sub">Relative humidity</div>
+      </div>
+
+      <!-- Soil Moisture -->
+      <div class="card" id="card-soil">
+        <div class="card-icon">🌍</div>
+        <div class="card-label">Soil Moisture</div>
+        <div class="card-value" id="val-soil">—<span class="card-unit">%</span></div>
+        <div class="soil-bar-wrap">
+          <div class="soil-bar-fill" id="soil-bar" style="width:0%"></div>
+        </div>
+        <div class="card-sub" id="sub-soil">Analog pin A0</div>
+      </div>
+
+      <!-- History side panel -->
+      <div class="history-panel" style="grid-row: 1 / 3;">
+        <div class="history-header">Recent Readings</div>
+        <div class="history-list" id="history-list">
+          <div style="padding:20px;color:var(--muted);font-size:11px;">No data yet…</div>
+        </div>
+      </div>
+
+      <!-- Stress Status -->
+      <div class="stress-card" id="stress-card" style="grid-column:1/4; grid-row:2;">
+        <div class="stress-level-badge" id="stress-badge">
+          <div class="level-text" id="stress-level">—</div>
+          <div class="level-sub">STRESS LEVEL</div>
+        </div>
+        <div class="stress-info">
+          <div class="stress-desc" id="stress-desc">Awaiting first sensor reading…</div>
+          <div class="stress-score-row">
+            <div class="score-bar-wrap">
+              <div class="score-bar-fill" id="score-bar" style="width:0%"></div>
+            </div>
+            <div class="score-text" id="score-text">0%</div>
+          </div>
+        </div>
+        <!-- Rain -->
+        <div>
+          <div class="card-label" style="margin-bottom:6px">Rain Sensor</div>
+          <div id="rain-badge" class="rain-badge rain-no">⛅ None</div>
+        </div>
+      </div>
+
+    </div><!-- /grid -->
+  </div><!-- /dashboard -->
+
+
+  <!-- ─── TREATMENT TAB ──────────────────────────────────── -->
+  <div class="tab-panel" id="panel-treatment">
+
+    <div class="current-treatment-banner" id="treatment-banner">
+      <div class="banner-icon" id="treatment-icon">🌿</div>
+      <div>
+        <div class="banner-title" id="treatment-title">Awaiting diagnosis…</div>
+        <div class="banner-sub" id="treatment-sub">Run a sensor reading to get treatment recommendations</div>
+      </div>
+    </div>
+
+    <div class="active-steps-list">
+      <div class="active-steps-header">Recommended Actions</div>
+      <div id="active-steps-body">
+        <div style="padding:20px;color:var(--muted);font-size:12px;">No data yet. Check the Dashboard first.</div>
+      </div>
+    </div>
+
+    <div class="treatment-grid" id="treatment-grid">
+
+      <div class="treatment-card">
+        <div class="treatment-card-header">
+          <div class="badge-circle" style="background:#0d2b1a;">🟢</div>
+          <div>
+            <div class="treatment-card-title">Healthy</div>
+            <div class="treatment-card-sub">Maintenance protocol</div>
+          </div>
+        </div>
+        <ul class="treatment-steps" id="steps-HEALTHY"></ul>
+      </div>
+
+      <div class="treatment-card">
+        <div class="treatment-card-header">
+          <div class="badge-circle" style="background:#2b2200;">🟡</div>
+          <div>
+            <div class="treatment-card-title">Moderate Stress</div>
+            <div class="treatment-card-sub">Early intervention</div>
+          </div>
+        </div>
+        <ul class="treatment-steps" id="steps-MODERATE"></ul>
+      </div>
+
+      <div class="treatment-card">
+        <div class="treatment-card-header">
+          <div class="badge-circle" style="background:#2b1500;">🟠</div>
+          <div>
+            <div class="treatment-card-title">High Stress</div>
+            <div class="treatment-card-sub">Urgent care needed</div>
+          </div>
+        </div>
+        <ul class="treatment-steps" id="steps-HIGH"></ul>
+      </div>
+
+      <div class="treatment-card">
+        <div class="treatment-card-header">
+          <div class="badge-circle" style="background:#2b0000;">🔴</div>
+          <div>
+            <div class="treatment-card-title">Critical</div>
+            <div class="treatment-card-sub">Emergency protocol</div>
+          </div>
+        </div>
+        <ul class="treatment-steps" id="steps-CRITICAL"></ul>
+      </div>
+
+    </div>
+  </div><!-- /treatment -->
+
+
+  <!-- ─── HISTORY TAB ────────────────────────────────────── -->
+  <div class="tab-panel" id="panel-history">
+    <div class="card" style="overflow:hidden; padding:0;">
+      <table style="width:100%; border-collapse:collapse; font-size:12px;">
+        <thead>
+          <tr style="background:var(--surface); color:var(--muted); letter-spacing:1px; text-transform:uppercase; font-size:10px;">
+            <th style="padding:14px 20px; text-align:left;">Time</th>
+            <th style="padding:14px; text-align:center;">Temp °C</th>
+            <th style="padding:14px; text-align:center;">Humidity %</th>
+            <th style="padding:14px; text-align:center;">Soil %</th>
+            <th style="padding:14px; text-align:center;">Rain</th>
+            <th style="padding:14px; text-align:center;">Score</th>
+            <th style="padding:14px; text-align:center;">Status</th>
+          </tr>
+        </thead>
+        <tbody id="history-table-body">
+          <tr>
+            <td colspan="7" style="padding:24px;color:var(--muted);text-align:center;">No readings yet…</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div><!-- /history -->
+
+
+  <!-- ─── SETTINGS TAB ──────────────────────────────────── -->
+  <div class="tab-panel" id="panel-settings">
+    <div class="settings-section">
+      <div class="settings-title">System Configuration</div>
+      <div class="settings-row">
+        <div class="settings-key">Blynk Auth Token</div>
+        <div class="settings-val" id="set-token">thA5Vc7-…T0cJ</div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-key">WiFi SSID</div>
+        <div class="settings-val">Galaxy A14 5G 041E</div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-key">Sensor Pins</div>
+        <div class="settings-val">DHT11→D2 | Soil→A0 | Rain→D16</div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-key">ELSA Model Weights</div>
+        <div class="settings-val" id="set-weights">Loading…</div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-key">Max Possible Score</div>
+        <div class="settings-val" id="set-maxscore">—</div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-key">Polling Interval</div>
+        <div class="settings-val">5 seconds</div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-key">Backend API</div>
+        <div class="settings-val" id="set-api">http://localhost:5000</div>
+      </div>
+    </div>
+  </div><!-- /settings -->
+
+</main>
+
+
+<script>
+/* ──────────────────────────────────────────────────────────────
+   ELSA Frontend – Plant Stress Language Decoder
+   Polls Flask backend every 5 seconds, updates all UI.
+────────────────────────────────────────────────────────────── */
+
+const API_BASE = "http://localhost:5000";
+const POLL_MS  = 120000;
+
+// ── Historical buffer for in-page history tab
+const readings = [];
+
+// ── Treatment library (mirrors backend)
+const TREATMENT_LIBRARY = {
+  HEALTHY:  [
+    "✅ Continue current watering schedule",
+    "🌱 Apply compost tea once a week for nutrients",
+    "☀️ Maintain current light and temperature levels",
+    "🔍 Routine inspection for pests every 3 days",
+    "📝 Keep a plant journal to track long-term health"
+  ],
+  MODERATE: [
+    "💦 Water if soil moisture is below 40%",
+    "🌤️ Ensure adequate sunlight (6–8 hrs/day)",
+    "🌬️ Improve airflow around the plant",
+    "🧹 Check for early signs of pests or fungus",
+    "📊 Log readings for trend analysis"
+  ],
+  HIGH: [
+    "💧 Increase watering frequency – soil is drying out",
+    "🌿 Ensure humidity is above 50% – use a humidifier if indoors",
+    "🌡️ Maintain temperature between 20°C–30°C",
+    "🧴 Apply a balanced NPK fertilizer (diluted)",
+    "📅 Re-evaluate conditions within 6 hours"
+  ],
+  CRITICAL: [
+    "🚨 Irrigate immediately – soil moisture critically low",
+    "🌡️ Move plant to a shaded area if temperature > 38°C",
+    "💧 Apply foliar spray to reduce heat stress",
+    "🧪 Check for root rot if soil is waterlogged",
+    "📋 Monitor every 30 minutes until values stabilize"
+  ]
+};
+
+// ── Populate static treatment cards
+function buildTreatmentCards() {
+  for (const [level, steps] of Object.entries(TREATMENT_LIBRARY)) {
+    const el = document.getElementById(`steps-${level}`);
+    if (!el) continue;
+    el.innerHTML = steps.map(s =>
+      `<li class="treatment-step">${s}</li>`
+    ).join('');
+  }
+}
+
+// ── Color map
+const COLORS = {
+  HEALTHY:  "#2ecc71",
+  MODERATE: "#f5c518",
+  HIGH:     "#ff7a00",
+  CRITICAL: "#ff2d2d"
+};
+
+const ICONS = {
+  HEALTHY:  "🌿",
+  MODERATE: "⚠️",
+  HIGH:     "🔥",
+  CRITICAL: "🚨"
+};
+
+// ── Apply CSS variable for stress color
+function setStressColor(color) {
+  document.documentElement.style.setProperty('--stress-color', color);
+}
+
+// ── Format timestamp HH:MM:SS
+function fmtTime(iso) {
+  return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+// ── Update dashboard
+function updateDashboard(data) {
+  const s  = data.sensors;
+  const st = data.stress;
+  const m  = data.model;
+  const color = COLORS[st.level] || "#39ff6a";
+
+  // Sensor cards
+  document.getElementById('val-temp').innerHTML  = `${s.temperature}<span class="card-unit">°C</span>`;
+  document.getElementById('val-hum').innerHTML   = `${s.humidity}<span class="card-unit">%</span>`;
+  document.getElementById('val-soil').innerHTML  = `${s.soil_pct}<span class="card-unit">%</span>`;
+  document.getElementById('soil-bar').style.width = `${s.soil_pct}%`;
+  document.getElementById('sub-soil').textContent = `Raw ADC: ${s.soil_raw}`;
+
+  // Temp context
+  const tSub = s.temperature > 35 ? '⚠️ High – heat stress risk' :
+               s.temperature < 18 ? '❄️ Low – cold stress risk' :
+               '✅ Optimal range';
+  document.getElementById('sub-temp').textContent = tSub;
+
+  // Rain
+  const rainEl = document.getElementById('rain-badge');
+  if (s.rain === 1) {
+    rainEl.className = 'rain-badge rain-yes';
+    rainEl.textContent = '🌧️ Detected';
+  } else {
+    rainEl.className = 'rain-badge rain-no';
+    rainEl.textContent = '⛅ None';
+  }
+
+  // Stress card
+  setStressColor(color);
+  document.getElementById('stress-level').textContent = st.label;
+  document.getElementById('stress-desc').textContent  = st.description;
+  const pct = Math.round(m.ratio * 100);
+  document.getElementById('score-bar').style.width    = `${pct}%`;
+  document.getElementById('score-text').textContent   = `${pct}%`;
+
+  // Status dot color
+  document.getElementById('statusDot').style.background = color;
+
+  // Header timestamp
+  document.getElementById('lastUpdated').textContent = fmtTime(data.timestamp);
+  document.getElementById('statusText').textContent  = 'Live';
+
+  // History sidebar
+  updateHistorySidebar(data);
+}
+
+// ── History sidebar (last 10 in dashboard)
+let historyItems = [];
+function updateHistorySidebar(data) {
+  historyItems.unshift(data);
+  if (historyItems.length > 30) historyItems.pop();
+
+  const list = document.getElementById('history-list');
+  list.innerHTML = historyItems.slice(0, 15).map(d => `
+    <div class="history-item">
+      <span class="history-time">${fmtTime(d.timestamp)}</span>
+      <span class="history-badge badge-${d.stress.level}">${d.stress.level}</span>
+    </div>
+  `).join('');
+
+  // Also update history table
+  updateHistoryTable();
+}
+
+function updateHistoryTable() {
+  const tbody = document.getElementById('history-table-body');
+  if (!historyItems.length) return;
+  tbody.innerHTML = historyItems.map(d => {
+    const s = d.sensors;
+    const st = d.stress;
+    const color = COLORS[st.level] || '#fff';
+    return `
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:12px 20px; color:var(--muted)">${fmtTime(d.timestamp)}</td>
+        <td style="padding:12px; text-align:center;">${s.temperature}</td>
+        <td style="padding:12px; text-align:center;">${s.humidity}</td>
+        <td style="padding:12px; text-align:center;">${s.soil_pct}</td>
+        <td style="padding:12px; text-align:center;">${s.rain_label}</td>
+        <td style="padding:12px; text-align:center; color:${color}">${Math.round(d.model.ratio*100)}%</td>
+        <td style="padding:12px; text-align:center;">
+          <span class="history-badge badge-${st.level}">${st.level}</span>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ── Update treatment tab
+function updateTreatment(data) {
+  const st = data.stress;
+  const color = COLORS[st.level] || '#39ff6a';
+  const icon  = ICONS[st.level]  || '🌿';
+
+  document.getElementById('treatment-icon').textContent   = icon;
+  document.getElementById('treatment-title').textContent  = `Current Status: ${st.label}`;
+  document.getElementById('treatment-sub').textContent    = st.description;
+  document.getElementById('treatment-banner').style.borderColor = color;
+
+  // Active steps
+  const steps = st.treatment || TREATMENT_LIBRARY[st.level] || [];
+  document.getElementById('active-steps-body').innerHTML = steps.map((step, i) => `
+    <div class="active-step-item">
+      <div class="step-num">${i + 1}</div>
+      <div>${step}</div>
+    </div>
+  `).join('');
+
+  // Highlight the matching card
+  for (const level of ['HEALTHY','MODERATE','HIGH','CRITICAL']) {
+    const el = document.getElementById(`steps-${level}`);
+    if (!el) continue;
+    el.querySelectorAll('.treatment-step').forEach(li => {
+      li.classList.toggle('active-step', level === st.level);
+    });
+  }
+}
+
+// ── Update settings
+function updateSettings(data) {
+  const m = data.model;
+  const w = m.weights.map(v => v.toFixed(3)).join(', ');
+  document.getElementById('set-weights').textContent  = `[${w}]`;
+  document.getElementById('set-maxscore').textContent = m.max_score.toFixed(4);
+}
+
+// ── Main poll loop
+async function poll() {
+  try {
+    const res  = await fetch(`${API_BASE}/api/realtime`);
+    const data = await res.json();
+    updateDashboard(data);
+    updateTreatment(data);
+    updateSettings(data);
+    readings.push(data);
+  } catch (err) {
+    console.warn('[ELSA] Backend unreachable:', err.message);
+    document.getElementById('statusText').textContent = 'Offline';
+    document.getElementById('statusDot').style.background = '#ff2d2d';
+
+    // ── Demo fallback so UI still shows values ──
+    simulateFallback();
+  }
+}
+
+// ── Demo mode (if backend not running)
+function simulateFallback() {
+  const temp     = 28 + (Math.random() - 0.5) * 6;
+  const humidity = 50 + (Math.random() - 0.5) * 20;
+  const soil_raw = 300 + Math.random() * 400;
+  const rain     = Math.random() > 0.8 ? 1 : 0;
+
+  // ELSA weights
+  const W = [2.16997417, 2.09252218, 1.11647673, 0.85725488];
+  const MAX = W.reduce((a,b)=>a+b, 0);
+  const f = [
+    Math.max(0, Math.min(1, (temp - 15) / 25)),
+    Math.max(0, Math.min(1, humidity / 100)),
+    Math.max(0, Math.min(1, soil_raw / 1023)),
+    rain
+  ];
+  const score = f.reduce((s, v, i) => s + W[i] * v, 0);
+  const ratio = score / MAX;
+  const soil_pct = Math.round((1 - soil_raw / 1023) * 100);
+
+  const levels = ratio < 0.3 ? {level:'CRITICAL',label:'Severe Stress',color:'#ff2d2d',description:'Plant is under severe stress. Immediate intervention required.'}
+               : ratio < 0.5 ? {level:'HIGH',label:'High Stress',color:'#ff7a00',description:'Plant is showing signs of significant stress. Action needed soon.'}
+               : ratio < 0.7 ? {level:'MODERATE',label:'Moderate Stress',color:'#f5c518',description:'Plant is experiencing mild stress. Monitor and adjust conditions.'}
+               :               {level:'HEALTHY',label:'Healthy',color:'#2ecc71',description:'Plant is in good health. Maintain current conditions.'};
+
+  const fakeData = {
+    timestamp: new Date().toISOString(),
+    sensors: {
+      temperature: Math.round(temp*10)/10,
+      humidity:    Math.round(humidity*10)/10,
+      soil_raw:    Math.round(soil_raw),
+      soil_pct:    soil_pct,
+      rain, rain_label: rain ? 'Detected' : 'None'
+    },
+    model: { score, max_score: MAX, ratio, weights: W },
+    stress: {
+      ...levels,
+      treatment: TREATMENT_LIBRARY[levels.level]
+    }
+  };
+
+  updateDashboard(fakeData);
+  updateTreatment(fakeData);
+  updateSettings(fakeData);
+}
+
+// ── Tab switching
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`panel-${btn.dataset.tab}`).classList.add('active');
+  });
+});
+
+// ── Init
+buildTreatmentCards();
+
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    document.getElementById('loader').classList.add('hidden');
+  }, 1400);
+
+  poll();
+  setInterval(poll, POLL_MS);
+});
+</script>
+</body>
+</html>
